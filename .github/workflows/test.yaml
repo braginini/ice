@@ -13,7 +13,7 @@ name: Test
 on:
   push:
     branches:
-    - test
+    - master
   pull_request:
     branches:
     - master
