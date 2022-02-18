@@ -3,12 +3,13 @@
 package ice
 
 import (
-	"github.com/pion/stun"
-	"github.com/stretchr/testify/require"
 	"net"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pion/stun"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUniversalUDPMux(t *testing.T) {
@@ -36,7 +37,6 @@ func TestUniversalUDPMux(t *testing.T) {
 	}()
 
 	wg.Wait()
-
 }
 
 func testMuxSrflxConnection(t *testing.T, udpMux *UniversalUDPMuxDefault, ufrag string, network string) {

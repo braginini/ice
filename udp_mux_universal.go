@@ -2,10 +2,11 @@ package ice
 
 import (
 	"fmt"
-	"github.com/pion/logging"
-	"github.com/pion/stun"
 	"net"
 	"time"
+
+	"github.com/pion/logging"
+	"github.com/pion/stun"
 )
 
 // UniversalUDPMux allows multiple connections to go over a single UDP port for
