@@ -125,6 +125,7 @@ type Agent struct {
 	net    *vnet.Net
 	tcpMux TCPMux
 	udpMux UDPMux
+	udpMuxSrflx UniversalUDPMux
 
 	interfaceFilter func(string) bool
 
@@ -891,6 +892,9 @@ func (a *Agent) removeUfragFromMux() {
 	a.tcpMux.RemoveConnByUfrag(a.localUfrag)
 	if a.udpMux != nil {
 		a.udpMux.RemoveConnByUfrag(a.localUfrag)
+	}
+	if a.udpMuxSrflx != nil {
+		a.udpMuxSrflx.RemoveConnByUfrag(a.localUfrag)
 	}
 }
 
