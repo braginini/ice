@@ -5,7 +5,6 @@ package ice
 import (
 	"context"
 	"crypto/tls"
-	"github.com/pion/stun"
 	"io"
 	"net"
 	"net/url"
@@ -19,6 +18,7 @@ import (
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/pkg/crypto/selfsign"
 	"github.com/pion/logging"
+	"github.com/pion/stun"
 	"github.com/pion/transport/test"
 	"github.com/pion/turn/v2"
 	"github.com/stretchr/testify/assert"
