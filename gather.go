@@ -97,7 +97,6 @@ func (a *Agent) gatherCandidates(ctx context.Context) {
 		case CandidateTypeServerReflexive:
 			wg.Add(1)
 			go func() {
-				a.gatherCandidatesSrflx(ctx, a.urls, a.networkTypes)
 				if a.udpMuxSrflx != nil {
 					a.gatherCandidatesSrflxUDPMux(ctx, a.urls, a.networkTypes)
 				} else {
@@ -338,7 +337,7 @@ func (a *Agent) gatherCandidatesSrflxMapped(ctx context.Context, networkTypes []
 	}
 }
 
-func (a *Agent) gatherCandidatesSrflx(ctx context.Context, urls []*URL, networkTypes []NetworkType) {
+func (a *Agent) gatherCandidatesSrflxUDPMux(ctx context.Context, urls []*URL, networkTypes []NetworkType) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -359,15 +358,15 @@ func (a *Agent) gatherCandidatesSrflx(ctx context.Context, urls []*URL, networkT
 					return
 				}
 
-				conn, err := listenUDPInPortRange(a.net, a.log, int(a.portmax), int(a.portmin), network, &net.UDPAddr{IP: nil, Port: 0})
+				xoraddr, err := a.udpMuxSrflx.GetXORMappedAddr(serverAddr, stunGatherTimeout)
 				if err != nil {
-					closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to listen for %s: %v\n", serverAddr.String(), err))
+					a.log.Warnf("could not get server reflexive address %s %s: %v\n", network, url, err)
 					return
 				}
 
-				xoraddr, err := getXORMappedAddr(conn, serverAddr, stunGatherTimeout)
+				conn, err := a.udpMuxSrflx.GetConnForURL(a.localUfrag, url.String())
 				if err != nil {
-					closeConnAndLog(conn, a.log, fmt.Sprintf("could not get server reflexive address %s %s: %v\n", network, url, err))
+					a.log.Warnf("could not find connection in UDPMuxSrflx %s %s: %v\n", network, url, err)
 					return
 				}
 
@@ -400,7 +399,7 @@ func (a *Agent) gatherCandidatesSrflx(ctx context.Context, urls []*URL, networkT
 	}
 }
 
-func (a *Agent) gatherCandidatesSrflxUDPMux(ctx context.Context, urls []*URL, networkTypes []NetworkType) {
+func (a *Agent) gatherCandidatesSrflx(ctx context.Context, urls []*URL, networkTypes []NetworkType) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -421,15 +420,15 @@ func (a *Agent) gatherCandidatesSrflxUDPMux(ctx context.Context, urls []*URL, ne
 					return
 				}
 
-				xoraddr, err := a.udpMuxSrflx.GetXORMappedAddr(serverAddr, stunGatherTimeout)
+				conn, err := listenUDPInPortRange(a.net, a.log, int(a.portmax), int(a.portmin), network, &net.UDPAddr{IP: nil, Port: 0})
 				if err != nil {
-					a.log.Warnf("could not get server reflexive address %s %s: %v\n", network, url, err)
+					closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to listen for %s: %v\n", serverAddr.String(), err))
 					return
 				}
 
-				conn, err := a.udpMuxSrflx.GetConn(a.localUfrag)
+				xoraddr, err := getXORMappedAddr(conn, serverAddr, stunGatherTimeout)
 				if err != nil {
-					a.log.Warnf("could not find local connection in UDPMux %s %s: %v\n", network, url, err)
+					closeConnAndLog(conn, a.log, fmt.Sprintf("could not get server reflexive address %s %s: %v\n", network, url, err))
 					return
 				}
 

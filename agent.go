@@ -320,6 +320,7 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 		a.tcpMux = newInvalidTCPMux()
 	}
 	a.udpMux = config.UDPMux
+	a.udpMuxSrflx = config.UDPMuxSrflx
 
 	if a.net == nil {
 		a.net = vnet.NewNet(nil)
