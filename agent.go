@@ -122,9 +122,9 @@ type Agent struct {
 	loggerFactory logging.LoggerFactory
 	log           logging.LeveledLogger
 
-	net    *vnet.Net
-	tcpMux TCPMux
-	udpMux UDPMux
+	net         *vnet.Net
+	tcpMux      TCPMux
+	udpMux      UDPMux
 	udpMuxSrflx UniversalUDPMux
 
 	interfaceFilter func(string) bool

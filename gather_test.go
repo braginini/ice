@@ -495,7 +495,7 @@ func TestUniversalUDPMuxUsage(t *testing.T) {
 	lim := test.TimeOut(time.Second * 30)
 	defer lim.Stop()
 
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP{127,0,0,1}, Port: randomPort(t)})
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: randomPort(t)})
 	assert.NoError(t, err)
 	defer func() {
 		_ = conn.Close()
@@ -519,7 +519,7 @@ func TestUniversalUDPMuxUsage(t *testing.T) {
 		NetworkTypes:   supportedNetworkTypes(),
 		Urls:           urls,
 		CandidateTypes: []CandidateType{CandidateTypeServerReflexive},
-		UDPMuxSrflx: udpMuxSrflx,
+		UDPMuxSrflx:    udpMuxSrflx,
 	})
 	assert.NoError(t, err)
 
@@ -547,10 +547,10 @@ func TestUniversalUDPMuxUsage(t *testing.T) {
 type universalUDPMuxMock struct {
 	UDPMux
 	getXORMappedAddrUsedTimes int
-	removeConnByUfragTimes int
-	getConnForURLTimes int
-	mu sync.Mutex
-	conn *net.UDPConn
+	removeConnByUfragTimes    int
+	getConnForURLTimes        int
+	mu                        sync.Mutex
+	conn                      *net.UDPConn
 }
 
 func (m *universalUDPMuxMock) GetRelayedAddr(turnAddr net.Addr, deadline time.Duration) (*net.Addr, error) {
@@ -568,7 +568,7 @@ func (m *universalUDPMuxMock) GetXORMappedAddr(serverAddr net.Addr, deadline tim
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.getXORMappedAddrUsedTimes++
-	return &stun.XORMappedAddress{IP: net.IP{100,64,0,1}, Port: 77878}, nil
+	return &stun.XORMappedAddress{IP: net.IP{100, 64, 0, 1}, Port: 77878}, nil
 }
 
 func (m *universalUDPMuxMock) RemoveConnByUfrag(ufrag string) {
