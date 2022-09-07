@@ -256,7 +256,7 @@ func (m *UDPMuxDefault) connWorker() {
 		// We need the following block to discover Peer Reflexive Candidates for which we don't know the Endpoint upfront.
 		// However, we can take a username attribute from the STUN message, which contains ufrag.
 		// We can use ufrag to identify the destination conn to route the packet.
-		if stun.IsMessage(buf[:n]) {
+		if len(destinationConnList) == 0 && stun.IsMessage(buf[:n]) {
 			msg := &stun.Message{
 				Raw: append([]byte{}, buf[:n]...),
 			}
