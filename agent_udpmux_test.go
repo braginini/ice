@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/pion/logging"
-	"github.com/pion/transport/test"
+	"github.com/pion/transport/v2/test"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,63 +23,74 @@ func TestMuxAgent(t *testing.T) {
 
 	const muxPort = 7686
 
-	c, err := net.ListenUDP(udp, &net.UDPAddr{
-		Port: muxPort,
-	})
+	caseAddrs := map[string]*net.UDPAddr{
+		"unspecified":  {Port: muxPort},
+		"ipv4Loopback": {IP: net.IPv4(127, 0, 0, 1), Port: muxPort},
+	}
 
-	loggerFactory := logging.NewDefaultLoggerFactory()
-	udpMux := NewUDPMuxDefault(UDPMuxParams{
-		Logger:  loggerFactory.NewLogger("ice"),
-		UDPConn: c,
-	})
+	for subTest, addr := range caseAddrs {
+		muxAddr := addr
+		t.Run(subTest, func(t *testing.T) {
+			c, err := net.ListenUDP("udp", muxAddr)
+			require.NoError(t, err)
 
-	require.NoError(t, err)
-	defer func() {
-		_ = udpMux.Close()
-		_ = c.Close()
-	}()
+			loggerFactory := logging.NewDefaultLoggerFactory()
+			udpMux := NewUDPMuxDefault(UDPMuxParams{
+				Logger:  loggerFactory.NewLogger("ice"),
+				UDPConn: c,
+			})
 
-	muxedA, err := NewAgent(&AgentConfig{
-		UDPMux:         udpMux,
-		CandidateTypes: []CandidateType{CandidateTypeHost},
-		NetworkTypes: []NetworkType{
-			NetworkTypeUDP4,
-		},
-	})
-	require.NoError(t, err)
+			muxedA, err := NewAgent(&AgentConfig{
+				UDPMux:         udpMux,
+				CandidateTypes: []CandidateType{CandidateTypeHost},
+				NetworkTypes: []NetworkType{
+					NetworkTypeUDP4,
+				},
+			})
+			require.NoError(t, err)
 
-	a, err := NewAgent(&AgentConfig{
-		CandidateTypes: []CandidateType{CandidateTypeHost},
-		NetworkTypes:   supportedNetworkTypes(),
-	})
-	require.NoError(t, err)
+			a, err := NewAgent(&AgentConfig{
+				CandidateTypes: []CandidateType{CandidateTypeHost},
+				NetworkTypes:   supportedNetworkTypes(),
+			})
+			require.NoError(t, err)
 
-	conn, muxedConn := connect(a, muxedA)
+			conn, muxedConn := connect(a, muxedA)
 
-	pair := muxedA.getSelectedPair()
-	require.NotNil(t, pair)
-	require.Equal(t, muxPort, pair.Local.Port())
+			pair := muxedA.getSelectedPair()
+			require.NotNil(t, pair)
+			require.Equal(t, muxPort, pair.Local.Port())
 
-	// send a packet to Mux
-	data := []byte("hello world")
-	_, err = conn.Write(data)
-	require.NoError(t, err)
+			// send a packet to Mux
+			data := []byte("hello world")
+			_, err = conn.Write(data)
+			require.NoError(t, err)
 
-	buffer := make([]byte, 1024)
-	n, err := muxedConn.Read(buffer)
-	require.NoError(t, err)
-	require.Equal(t, data, buffer[:n])
+			buf := make([]byte, 1024)
+			n, err := muxedConn.Read(buf)
+			require.NoError(t, err)
+			require.Equal(t, data, buf[:n])
 
-	// send a packet from Mux
-	_, err = muxedConn.Write(data)
-	require.NoError(t, err)
+			// send a packet from Mux
+			_, err = muxedConn.Write(data)
+			require.NoError(t, err)
 
-	n, err = conn.Read(buffer)
-	require.NoError(t, err)
-	require.Equal(t, data, buffer[:n])
+			n, err = conn.Read(buf)
+			require.NoError(t, err)
+			require.Equal(t, data, buf[:n])
 
-	// close it down
-	require.NoError(t, conn.Close())
-	require.NoError(t, muxedConn.Close())
-	require.NoError(t, udpMux.Close())
+			// close it down
+			require.NoError(t, conn.Close())
+			require.NoError(t, muxedConn.Close())
+			require.NoError(t, udpMux.Close())
+
+			// expect error when reading from closed mux
+			_, err = muxedConn.Read(data)
+			require.Error(t, err)
+
+			// expect error when writing to closed mux
+			_, err = muxedConn.Write(data)
+			require.Error(t, err)
+		})
+	}
 }

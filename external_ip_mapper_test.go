@@ -189,15 +189,15 @@ func TestExternalIPMapper(t *testing.T) {
 		assert.Nil(t, m, "should be nil")
 	})
 
-	t.Run("newExternalIPMapper with inplicit and explicit local IP", func(t *testing.T) {
-		// Mixing inpicit and explicit local IPs not allowed
+	t.Run("newExternalIPMapper with implicit and explicit local IP", func(t *testing.T) {
+		// Mixing implicit and explicit local IPs not allowed
 		_, err := newExternalIPMapper(CandidateTypeUnspecified, []string{
 			"1.2.3.4",
 			"1.2.3.5/10.0.0.1",
 		})
 		assert.Error(t, err, "should fail")
 
-		// Mixing inpicit and explicit local IPs not allowed
+		// Mixing implicit and explicit local IPs not allowed
 		_, err = newExternalIPMapper(CandidateTypeUnspecified, []string{
 			"1.2.3.5/10.0.0.1",
 			"1.2.3.4",
@@ -226,7 +226,7 @@ func TestExternalIPMapper(t *testing.T) {
 		assert.Equal(t, "1.2.3.4", extIP.String(), "should match")
 
 		// find external IPv6
-		extIP, err = m.findExternalIP("fe80::0001") // use '0001' instead of '1' on purpse
+		extIP, err = m.findExternalIP("fe80::0001") // use '0001' instead of '1' on purpose
 		assert.NoError(t, err, "should succeed")
 		assert.Equal(t, "2200::1", extIP.String(), "should match")
 
@@ -263,11 +263,11 @@ func TestExternalIPMapper(t *testing.T) {
 		assert.Error(t, err, "should fail")
 
 		// find external IPv6
-		extIP, err = m.findExternalIP("fe80::0001") // use '0001' instead of '1' on purpse
+		extIP, err = m.findExternalIP("fe80::0001") // use '0001' instead of '1' on purpose
 		assert.NoError(t, err, "should succeed")
 		assert.Equal(t, "2200::1", extIP.String(), "should match")
 
-		extIP, err = m.findExternalIP("fe80::0002") // use '0002' instead of '2' on purpse
+		extIP, err = m.findExternalIP("fe80::0002") // use '0002' instead of '2' on purpose
 		assert.NoError(t, err, "should succeed")
 		assert.Equal(t, "2200::2", extIP.String(), "should match")
 
@@ -289,8 +289,9 @@ func TestExternalIPMapper(t *testing.T) {
 		assert.NoError(t, err, "should succeed")
 
 		// attempt to find IPv6 that does not exist in the map
-		_, err = m.findExternalIP("fe80::1")
-		assert.Error(t, err, "should fail")
+		extIP, err := m.findExternalIP("fe80::1")
+		assert.NoError(t, err, "should succeed")
+		assert.Equal(t, "fe80::1", extIP.String(), "should match")
 
 		m, err = newExternalIPMapper(CandidateTypeUnspecified, []string{
 			"2200::1",
@@ -298,7 +299,8 @@ func TestExternalIPMapper(t *testing.T) {
 		assert.NoError(t, err, "should succeed")
 
 		// attempt to find IPv4 that does not exist in the map
-		_, err = m.findExternalIP("10.0.0.1")
-		assert.Error(t, err, "should fail")
+		extIP, err = m.findExternalIP("10.0.0.1")
+		assert.NoError(t, err, "should succeed")
+		assert.Equal(t, "10.0.0.1", extIP.String(), "should match")
 	})
 }

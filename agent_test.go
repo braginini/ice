@@ -15,8 +15,8 @@ import (
 
 	"github.com/pion/logging"
 	"github.com/pion/stun"
-	"github.com/pion/transport/test"
-	"github.com/pion/transport/vnet"
+	"github.com/pion/transport/v2/test"
+	"github.com/pion/transport/v2/vnet"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,123 +30,6 @@ func (m *mockPacketConn) LocalAddr() net.Addr                                 { 
 func (m *mockPacketConn) SetDeadline(t time.Time) error                       { return nil }
 func (m *mockPacketConn) SetReadDeadline(t time.Time) error                   { return nil }
 func (m *mockPacketConn) SetWriteDeadline(t time.Time) error                  { return nil }
-
-func TestPairSearch(t *testing.T) {
-	report := test.CheckRoutines(t)
-	defer report()
-
-	// Limit runtime in case of deadlocks
-	lim := test.TimeOut(time.Second * 10)
-	defer lim.Stop()
-
-	var config AgentConfig
-	a, err := NewAgent(&config)
-	if err != nil {
-		t.Fatalf("Error constructing ice.Agent")
-	}
-
-	if len(a.checklist) != 0 {
-		t.Fatalf("TestPairSearch is only a valid test if a.validPairs is empty on construction")
-	}
-
-	cp := a.getBestAvailableCandidatePair()
-
-	if cp != nil {
-		t.Fatalf("No Candidate pairs should exist")
-	}
-
-	assert.NoError(t, a.Close())
-}
-
-func TestPairPriority(t *testing.T) {
-	report := test.CheckRoutines(t)
-	defer report()
-
-	// avoid deadlocks?
-	defer test.TimeOut(1 * time.Second).Stop()
-
-	a, err := NewAgent(&AgentConfig{})
-	if err != nil {
-		t.Fatalf("Failed to create agent: %s", err)
-	}
-
-	hostConfig := &CandidateHostConfig{
-		Network:   "udp",
-		Address:   "192.168.1.1",
-		Port:      19216,
-		Component: 1,
-	}
-	hostLocal, err := NewCandidateHost(hostConfig)
-	if err != nil {
-		t.Fatalf("Failed to construct local host candidate: %s", err)
-	}
-
-	relayConfig := &CandidateRelayConfig{
-		Network:   "udp",
-		Address:   "1.2.3.4",
-		Port:      12340,
-		Component: 1,
-		RelAddr:   "4.3.2.1",
-		RelPort:   43210,
-	}
-	relayRemote, err := NewCandidateRelay(relayConfig)
-	if err != nil {
-		t.Fatalf("Failed to construct remote relay candidate: %s", err)
-	}
-
-	srflxConfig := &CandidateServerReflexiveConfig{
-		Network:   "udp",
-		Address:   "10.10.10.2",
-		Port:      19218,
-		Component: 1,
-		RelAddr:   "4.3.2.1",
-		RelPort:   43212,
-	}
-	srflxRemote, err := NewCandidateServerReflexive(srflxConfig)
-	if err != nil {
-		t.Fatalf("Failed to construct remote srflx candidate: %s", err)
-	}
-
-	prflxConfig := &CandidatePeerReflexiveConfig{
-		Network:   "udp",
-		Address:   "10.10.10.2",
-		Port:      19217,
-		Component: 1,
-		RelAddr:   "4.3.2.1",
-		RelPort:   43211,
-	}
-	prflxRemote, err := NewCandidatePeerReflexive(prflxConfig)
-	if err != nil {
-		t.Fatalf("Failed to construct remote prflx candidate: %s", err)
-	}
-
-	hostConfig = &CandidateHostConfig{
-		Network:   "udp",
-		Address:   "1.2.3.5",
-		Port:      12350,
-		Component: 1,
-	}
-	hostRemote, err := NewCandidateHost(hostConfig)
-	if err != nil {
-		t.Fatalf("Failed to construct remote host candidate: %s", err)
-	}
-
-	for _, remote := range []Candidate{relayRemote, srflxRemote, prflxRemote, hostRemote} {
-		p := a.findPair(hostLocal, remote)
-
-		if p == nil {
-			p = a.addPair(hostLocal, remote)
-		}
-
-		p.state = CandidatePairStateSucceeded
-		bestPair := a.getBestValidCandidatePair()
-		if bestPair.String() != (&CandidatePair{Remote: remote, Local: hostLocal}).String() {
-			t.Fatalf("Unexpected bestPair %s (expected remote: %s)", bestPair, remote)
-		}
-	}
-
-	assert.NoError(t, a.Close())
-}
 
 func TestOnSelectedCandidatePairChange(t *testing.T) {
 	report := test.CheckRoutines(t)
@@ -235,7 +118,7 @@ func TestHandlePeerReflexive(t *testing.T) {
 	lim := test.TimeOut(time.Second * 2)
 	defer lim.Stop()
 
-	t.Run("UDP pflx candidate from handleInbound()", func(t *testing.T) {
+	t.Run("UDP prflx candidate from handleInbound()", func(t *testing.T) {
 		var config AgentConfig
 		runAgentTest(t, &config, func(ctx context.Context, a *Agent) {
 			a.selector = &controllingSelector{agent: a, log: a.log}
@@ -376,14 +259,16 @@ func TestConnectivityOnStartup(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	net0 := vnet.NewNet(&vnet.NetConfig{
+	net0, err := vnet.NewNet(&vnet.NetConfig{
 		StaticIPs: []string{"192.168.0.1"},
 	})
+	assert.NoError(t, err)
 	assert.NoError(t, wan.AddNet(net0))
 
-	net1 := vnet.NewNet(&vnet.NetConfig{
+	net1, err := vnet.NewNet(&vnet.NetConfig{
 		StaticIPs: []string{"192.168.0.2"},
 	})
+	assert.NoError(t, err)
 	assert.NoError(t, wan.AddNet(net1))
 
 	assert.NoError(t, wan.Start())
@@ -393,10 +278,9 @@ func TestConnectivityOnStartup(t *testing.T) {
 
 	KeepaliveInterval := time.Hour
 	cfg0 := &AgentConfig{
-		NetworkTypes:     supportedNetworkTypes(),
-		MulticastDNSMode: MulticastDNSModeDisabled,
-		Net:              net0,
-
+		NetworkTypes:      supportedNetworkTypes(),
+		MulticastDNSMode:  MulticastDNSModeDisabled,
+		Net:               net0,
 		KeepaliveInterval: &KeepaliveInterval,
 		CheckInterval:     &KeepaliveInterval,
 	}
@@ -920,7 +804,7 @@ func TestCandidatePairStats(t *testing.T) {
 	}
 
 	if prflxPairStat.State != CandidatePairStateFailed {
-		t.Fatalf("expected host-prfflx pair to have state failed, it has state %s instead",
+		t.Fatalf("expected host-prflx pair to have state failed, it has state %s instead",
 			prflxPairStat.State.String())
 	}
 
@@ -1232,7 +1116,7 @@ func TestAgentCredentials(t *testing.T) {
 	report := test.CheckRoutines(t)
 	defer report()
 
-	// Make sure to pass travis check by disabling the logs
+	// Make sure to pass Travis check by disabling the logs
 	log := logging.NewDefaultLoggerFactory()
 	log.DefaultLogLevel = logging.LogLevelDisabled
 
@@ -1375,13 +1259,24 @@ func TestAgentRestart(t *testing.T) {
 	oneSecond := time.Second
 
 	t.Run("Restart During Gather", func(t *testing.T) {
-		agent, err := NewAgent(&AgentConfig{})
-		assert.NoError(t, err)
+		connA, connB := pipe(&AgentConfig{
+			DisconnectedTimeout: &oneSecond,
+			FailedTimeout:       &oneSecond,
+		})
 
-		agent.gatheringState = GatheringStateGathering
+		ctx, cancel := context.WithCancel(context.Background())
+		assert.NoError(t, connB.agent.OnConnectionStateChange(func(c ConnectionState) {
+			if c == ConnectionStateFailed || c == ConnectionStateDisconnected {
+				cancel()
+			}
+		}))
 
-		assert.Equal(t, ErrRestartWhenGathering, agent.Restart("", ""))
-		assert.NoError(t, agent.Close())
+		connA.agent.gatheringState = GatheringStateGathering
+		assert.NoError(t, connA.agent.Restart("", ""))
+
+		<-ctx.Done()
+		assert.NoError(t, connA.agent.Close())
+		assert.NoError(t, connB.agent.Close())
 	})
 
 	t.Run("Restart When Closed", func(t *testing.T) {
@@ -1456,7 +1351,7 @@ func TestAgentRestart(t *testing.T) {
 		<-aConnected
 		<-bConnected
 
-		// Assert that we have new candiates each time
+		// Assert that we have new candidates each time
 		assert.NotEqual(t, connAFirstCandidates, generateCandidateAddressStrings(connA.agent.GetLocalCandidates()))
 		assert.NotEqual(t, connBFirstCandidates, generateCandidateAddressStrings(connB.agent.GetLocalCandidates()))
 
@@ -1610,9 +1505,11 @@ func TestRunTaskInSelectedCandidatePairChangeCallback(t *testing.T) {
 	isComplete := make(chan interface{})
 	isTested := make(chan interface{})
 	if err = aAgent.OnSelectedCandidatePairChange(func(Candidate, Candidate) {
-		_, _, errCred := aAgent.GetLocalUserCredentials()
-		assert.NoError(t, errCred)
-		close(isTested)
+		go func() {
+			_, _, errCred := aAgent.GetLocalUserCredentials()
+			assert.NoError(t, errCred)
+			close(isTested)
+		}()
 	}); err != nil {
 		t.Error(err)
 	}
@@ -1721,9 +1618,10 @@ func TestGetSelectedCandidatePair(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	net := vnet.NewNet(&vnet.NetConfig{
+	net, err := vnet.NewNet(&vnet.NetConfig{
 		StaticIPs: []string{"192.168.0.1"},
 	})
+	assert.NoError(t, err)
 	assert.NoError(t, wan.AddNet(net))
 
 	assert.NoError(t, wan.Start())
@@ -1779,14 +1677,16 @@ func TestAcceptAggressiveNomination(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	net0 := vnet.NewNet(&vnet.NetConfig{
+	net0, err := vnet.NewNet(&vnet.NetConfig{
 		StaticIPs: []string{"192.168.0.1"},
 	})
+	assert.NoError(t, err)
 	assert.NoError(t, wan.AddNet(net0))
 
-	net1 := vnet.NewNet(&vnet.NetConfig{
+	net1, err := vnet.NewNet(&vnet.NetConfig{
 		StaticIPs: []string{"192.168.0.2", "192.168.0.3", "192.168.0.4"},
 	})
+	assert.NoError(t, err)
 	assert.NoError(t, wan.AddNet(net1))
 
 	assert.NoError(t, wan.Start())

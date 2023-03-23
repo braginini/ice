@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/pion/logging"
-	"github.com/pion/transport/test"
-	"github.com/pion/transport/vnet"
+	"github.com/pion/transport/v2/test"
+	"github.com/pion/transport/v2/vnet"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,12 +24,15 @@ func TestVNetGather(t *testing.T) {
 	// log := loggerFactory.NewLogger("test")
 
 	t.Run("No local IP address", func(t *testing.T) {
+		n, err := vnet.NewNet(&vnet.NetConfig{})
+		assert.NoError(t, err)
+
 		a, err := NewAgent(&AgentConfig{
-			Net: vnet.NewNet(&vnet.NetConfig{}),
+			Net: n,
 		})
 		assert.NoError(t, err)
 
-		localIPs, err := localInterfaces(a.net, a.interfaceFilter, []NetworkType{NetworkTypeUDP4})
+		localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{NetworkTypeUDP4}, false)
 		if len(localIPs) > 0 {
 			t.Fatal("should return no local IP")
 		} else if err != nil {
@@ -54,8 +57,8 @@ func TestVNetGather(t *testing.T) {
 			t.Fatalf("Failed to create a router: %s", err)
 		}
 
-		nw := vnet.NewNet(&vnet.NetConfig{})
-		if nw == nil {
+		nw, err := vnet.NewNet(&vnet.NetConfig{})
+		if err != nil {
 			t.Fatalf("Failed to create a Net: %s", err)
 		}
 
@@ -69,7 +72,7 @@ func TestVNetGather(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		localIPs, err := localInterfaces(a.net, a.interfaceFilter, []NetworkType{NetworkTypeUDP4})
+		localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{NetworkTypeUDP4}, false)
 		if len(localIPs) == 0 {
 			t.Fatal("should have one local IP")
 		} else if err != nil {
@@ -97,8 +100,8 @@ func TestVNetGather(t *testing.T) {
 			t.Fatalf("Failed to create a router: %s", err)
 		}
 
-		nw := vnet.NewNet(&vnet.NetConfig{})
-		if nw == nil {
+		nw, err := vnet.NewNet(&vnet.NetConfig{})
+		if err != nil {
 			t.Fatalf("Failed to create a Net: %s", err)
 		}
 
@@ -112,7 +115,7 @@ func TestVNetGather(t *testing.T) {
 			t.Fatalf("Failed to create agent: %s", err)
 		}
 
-		localIPs, err := localInterfaces(a.net, a.interfaceFilter, []NetworkType{NetworkTypeUDP4})
+		localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{NetworkTypeUDP4}, false)
 		if len(localIPs) == 0 {
 			t.Fatal("localInterfaces found no interfaces, unable to test")
 		} else if err != nil {
@@ -190,10 +193,10 @@ func TestVNetGatherWithNAT1To1(t *testing.T) {
 		err = wan.AddRouter(lan)
 		assert.NoError(t, err, "should succeed")
 
-		nw := vnet.NewNet(&vnet.NetConfig{
+		nw, err := vnet.NewNet(&vnet.NetConfig{
 			StaticIPs: []string{localIP0, localIP1},
 		})
-		if nw == nil {
+		if err != nil {
 			t.Fatalf("Failed to create a Net: %s", err)
 		}
 
@@ -232,10 +235,10 @@ func TestVNetGatherWithNAT1To1(t *testing.T) {
 			t.Fatal("There must be two candidates")
 		}
 
-		laddr := [2]*net.UDPAddr{nil, nil}
+		lAddr := [2]*net.UDPAddr{nil, nil}
 		for i, candi := range candidates {
-			laddr[i] = candi.(*CandidateHost).conn.LocalAddr().(*net.UDPAddr) //nolint:forcetypeassert
-			if candi.Port() != laddr[i].Port {
+			lAddr[i] = candi.(*CandidateHost).conn.LocalAddr().(*net.UDPAddr) //nolint:forcetypeassert
+			if candi.Port() != lAddr[i].Port {
 				t.Fatalf("Unexpected candidate port: %d", candi.Port())
 			}
 		}
@@ -244,21 +247,21 @@ func TestVNetGatherWithNAT1To1(t *testing.T) {
 			if candidates[1].Address() != externalIP1 {
 				t.Fatalf("Unexpected candidate IP: %s", candidates[1].Address())
 			}
-			if laddr[0].IP.String() != localIP0 {
-				t.Fatalf("Unexpected listen IP: %s", laddr[0].IP.String())
+			if lAddr[0].IP.String() != localIP0 {
+				t.Fatalf("Unexpected listen IP: %s", lAddr[0].IP.String())
 			}
-			if laddr[1].IP.String() != localIP1 {
-				t.Fatalf("Unexpected listen IP: %s", laddr[1].IP.String())
+			if lAddr[1].IP.String() != localIP1 {
+				t.Fatalf("Unexpected listen IP: %s", lAddr[1].IP.String())
 			}
 		} else if candidates[0].Address() == externalIP1 {
 			if candidates[1].Address() != externalIP0 {
 				t.Fatalf("Unexpected candidate IP: %s", candidates[1].Address())
 			}
-			if laddr[0].IP.String() != localIP1 {
-				t.Fatalf("Unexpected listen IP: %s", laddr[0].IP.String())
+			if lAddr[0].IP.String() != localIP1 {
+				t.Fatalf("Unexpected listen IP: %s", lAddr[0].IP.String())
 			}
-			if laddr[1].IP.String() != localIP0 {
-				t.Fatalf("Unexpected listen IP: %s", laddr[1].IP.String())
+			if lAddr[1].IP.String() != localIP0 {
+				t.Fatalf("Unexpected listen IP: %s", lAddr[1].IP.String())
 			}
 		}
 	})
@@ -285,12 +288,12 @@ func TestVNetGatherWithNAT1To1(t *testing.T) {
 		err = wan.AddRouter(lan)
 		assert.NoError(t, err, "should succeed")
 
-		nw := vnet.NewNet(&vnet.NetConfig{
+		nw, err := vnet.NewNet(&vnet.NetConfig{
 			StaticIPs: []string{
 				"10.0.0.1",
 			},
 		})
-		if nw == nil {
+		if err != nil {
 			t.Fatalf("Failed to create a Net: %s", err)
 		}
 
@@ -366,8 +369,8 @@ func TestVNetGatherWithInterfaceFilter(t *testing.T) {
 		t.Fatalf("Failed to create a router: %s", err)
 	}
 
-	nw := vnet.NewNet(&vnet.NetConfig{})
-	if nw == nil {
+	nw, err := vnet.NewNet(&vnet.NetConfig{})
+	if err != nil {
 		t.Fatalf("Failed to create a Net: %s", err)
 	}
 
@@ -385,11 +388,31 @@ func TestVNetGatherWithInterfaceFilter(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		localIPs, err := localInterfaces(a.net, a.interfaceFilter, []NetworkType{NetworkTypeUDP4})
+		localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{NetworkTypeUDP4}, false)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(localIPs) != 0 {
 			t.Fatal("InterfaceFilter should have excluded everything")
+		}
+
+		assert.NoError(t, a.Close())
+	})
+
+	t.Run("IPFilter should exclude the IP", func(t *testing.T) {
+		a, err := NewAgent(&AgentConfig{
+			Net: nw,
+			IPFilter: func(ip net.IP) bool {
+				assert.Equal(t, net.IP{1, 2, 3, 1}, ip)
+				return false
+			},
+		})
+		assert.NoError(t, err)
+
+		localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{NetworkTypeUDP4}, false)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(localIPs) != 0 {
+			t.Fatal("IPFilter should have excluded everything")
 		}
 
 		assert.NoError(t, a.Close())
@@ -405,7 +428,7 @@ func TestVNetGatherWithInterfaceFilter(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		localIPs, err := localInterfaces(a.net, a.interfaceFilter, []NetworkType{NetworkTypeUDP4})
+		localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{NetworkTypeUDP4}, false)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(localIPs) == 0 {

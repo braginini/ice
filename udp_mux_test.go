@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/pion/stun"
-	"github.com/pion/transport/test"
+	"github.com/pion/transport/v2/test"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,49 +25,87 @@ func TestUDPMux(t *testing.T) {
 	lim := test.TimeOut(time.Second * 30)
 	defer lim.Stop()
 
-	conn, err := net.ListenUDP(udp, &net.UDPAddr{})
+	conn4, err := net.ListenUDP(udp, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	require.NoError(t, err)
 
-	udpMux := NewUDPMuxDefault(UDPMuxParams{
-		Logger:  nil,
-		UDPConn: conn,
-	})
-
-	require.NoError(t, err)
-
-	defer func() {
-		_ = udpMux.Close()
-		_ = conn.Close()
-	}()
-
-	require.NotNil(t, udpMux.LocalAddr(), "tcpMux.LocalAddr() is nil")
-
-	wg := sync.WaitGroup{}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testMuxConnection(t, udpMux, "ufrag1", udp)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testMuxConnection(t, udpMux, "ufrag2", "udp4")
-	}()
-
-	// skip ipv6 test on i386
-	const ptrSize = 32 << (^uintptr(0) >> 63)
-	if ptrSize != 32 {
-		testMuxConnection(t, udpMux, "ufrag3", "udp6")
+	conn6, err := net.ListenUDP(udp, &net.UDPAddr{IP: net.IPv6loopback})
+	if err != nil {
+		t.Log("IPv6 is not supported on this machine")
 	}
 
-	wg.Wait()
+	connUnspecified, err := net.ListenUDP(udp, nil)
+	require.NoError(t, err)
 
-	require.NoError(t, udpMux.Close())
+	conn4Unspecified, err := net.ListenUDP(udp, &net.UDPAddr{IP: net.IPv4zero})
+	require.NoError(t, err)
 
-	// can't create more connections
-	_, err = udpMux.GetConn("failufrag", false)
-	require.Error(t, err)
+	conn6Unspecified, err := net.ListenUDP(udp, &net.UDPAddr{IP: net.IPv6unspecified})
+	if err != nil {
+		t.Log("IPv6 is not supported on this machine")
+	}
+
+	type testCase struct {
+		name    string
+		conn    net.PacketConn
+		network string
+	}
+
+	for _, subTest := range []testCase{
+		{name: "IPv4loopback", conn: conn4, network: udp4},
+		{name: "IPv6loopback", conn: conn6, network: udp6},
+		{name: "Unspecified", conn: connUnspecified, network: udp},
+		{name: "IPv4Unspecified", conn: conn4Unspecified, network: udp4},
+		{name: "IPv6Unspecified", conn: conn6Unspecified, network: udp6},
+	} {
+		network, conn := subTest.network, subTest.conn
+		if udpConn, ok := conn.(*net.UDPConn); !ok || udpConn == nil {
+			continue
+		}
+		t.Run(subTest.name, func(t *testing.T) {
+			udpMux := NewUDPMuxDefault(UDPMuxParams{
+				Logger:  nil,
+				UDPConn: conn,
+			})
+
+			defer func() {
+				_ = udpMux.Close()
+				_ = conn.Close()
+			}()
+
+			require.NotNil(t, udpMux.LocalAddr(), "udpMux.LocalAddr() is nil")
+
+			wg := sync.WaitGroup{}
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				testMuxConnection(t, udpMux, "ufrag1", udp)
+			}()
+
+			const ptrSize = 32 << (^uintptr(0) >> 63)
+			if network == udp {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					testMuxConnection(t, udpMux, "ufrag2", udp4)
+				}()
+				// skip ipv6 test on i386
+				if ptrSize != 32 {
+					testMuxConnection(t, udpMux, "ufrag3", udp6)
+				}
+			} else if ptrSize != 32 || network != udp6 {
+				testMuxConnection(t, udpMux, "ufrag2", network)
+			}
+
+			wg.Wait()
+
+			require.NoError(t, udpMux.Close())
+
+			// can't create more connections
+			_, err = udpMux.GetConn("failufrag", udpMux.LocalAddr())
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestAddressEncoding(t *testing.T) {
@@ -111,19 +149,26 @@ func TestAddressEncoding(t *testing.T) {
 }
 
 func testMuxConnection(t *testing.T, udpMux *UDPMuxDefault, ufrag string, network string) {
-	pktConn, err := udpMux.GetConn(ufrag, false)
+	pktConn, err := udpMux.GetConn(ufrag, udpMux.LocalAddr())
 	require.NoError(t, err, "error retrieving muxed connection for ufrag")
 	defer func() {
 		_ = pktConn.Close()
 	}()
 
-	remoteConn, err := net.DialUDP(network, nil, &net.UDPAddr{
-		Port: udpMux.LocalAddr().(*net.UDPAddr).Port,
-	})
+	addr, ok := pktConn.LocalAddr().(*net.UDPAddr)
+	require.True(t, ok, "pktConn.LocalAddr() is not a net.UDPAddr")
+	if addr.IP.IsUnspecified() {
+		addr = &net.UDPAddr{Port: addr.Port}
+	}
+	remoteConn, err := net.DialUDP(network, nil, addr)
 	require.NoError(t, err, "error dialing test udp connection")
 
+	testMuxConnectionPair(t, pktConn, remoteConn, ufrag)
+}
+
+func testMuxConnectionPair(t *testing.T, pktConn net.PacketConn, remoteConn *net.UDPConn, ufrag string) {
 	// initial messages are dropped
-	_, err = remoteConn.Write([]byte("dropped bytes"))
+	_, err := remoteConn.Write([]byte("dropped bytes"))
 	require.NoError(t, err)
 	// wait for packet to be consumed
 	time.Sleep(time.Millisecond)

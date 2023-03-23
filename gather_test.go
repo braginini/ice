@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 	"github.com/pion/dtls/v2/pkg/crypto/selfsign"
 	"github.com/pion/logging"
 	"github.com/pion/stun"
-	"github.com/pion/transport/test"
+	"github.com/pion/transport/v2/test"
 	"github.com/pion/turn/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,7 @@ func TestListenUDP(t *testing.T) {
 	a, err := NewAgent(&AgentConfig{})
 	assert.NoError(t, err)
 
-	localIPs, err := localInterfaces(a.net, a.interfaceFilter, []NetworkType{NetworkTypeUDP4})
+	localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{NetworkTypeUDP4}, false)
 	assert.NotEqual(t, len(localIPs), 0, "localInterfaces found no interfaces, unable to test")
 	assert.NoError(t, err)
 
@@ -84,6 +85,88 @@ func TestListenUDP(t *testing.T) {
 	assert.Equal(t, err, ErrPort, "listenUDP with port restriction [%d, %d], did not return ErrPort", portMin, portMax)
 
 	assert.NoError(t, a.Close())
+}
+
+func TestLoopbackCandidate(t *testing.T) {
+	report := test.CheckRoutines(t)
+	defer report()
+
+	lim := test.TimeOut(time.Second * 30)
+	defer lim.Stop()
+	type testCase struct {
+		name        string
+		agentConfig *AgentConfig
+		loExpected  bool
+	}
+	mux, err := NewMultiUDPMuxFromPort(12500)
+	assert.NoError(t, err)
+	muxWithLo, errlo := NewMultiUDPMuxFromPort(12501, UDPMuxFromPortWithLoopback())
+	assert.NoError(t, errlo)
+	testCases := []testCase{
+		{
+			name: "mux should not have loopback candidate",
+			agentConfig: &AgentConfig{
+				NetworkTypes: []NetworkType{NetworkTypeUDP4, NetworkTypeUDP6},
+				UDPMux:       mux,
+			},
+			loExpected: false,
+		},
+		{
+			name: "mux with loopback should not have loopback candidate",
+			agentConfig: &AgentConfig{
+				NetworkTypes: []NetworkType{NetworkTypeUDP4, NetworkTypeUDP6},
+				UDPMux:       muxWithLo,
+			},
+			loExpected: true,
+		},
+		{
+			name: "includeloopback enabled",
+			agentConfig: &AgentConfig{
+				NetworkTypes:    []NetworkType{NetworkTypeUDP4, NetworkTypeUDP6},
+				IncludeLoopback: true,
+			},
+			loExpected: true,
+		},
+		{
+			name: "includeloopback disabled",
+			agentConfig: &AgentConfig{
+				NetworkTypes:    []NetworkType{NetworkTypeUDP4, NetworkTypeUDP6},
+				IncludeLoopback: false,
+			},
+			loExpected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tcase := tc
+		t.Run(tcase.name, func(t *testing.T) {
+			a, err := NewAgent(tc.agentConfig)
+			assert.NoError(t, err)
+
+			candidateGathered, candidateGatheredFunc := context.WithCancel(context.Background())
+			var loopback int32
+			assert.NoError(t, a.OnCandidate(func(c Candidate) {
+				if c != nil {
+					if net.ParseIP(c.Address()).IsLoopback() {
+						atomic.StoreInt32(&loopback, 1)
+					}
+				} else {
+					candidateGatheredFunc()
+					return
+				}
+				t.Log(c.NetworkType(), c.Priority(), c)
+			}))
+			assert.NoError(t, a.GatherCandidates())
+
+			<-candidateGathered.Done()
+
+			assert.NoError(t, a.Close())
+			assert.Equal(t, tcase.loExpected, atomic.LoadInt32(&loopback) == 1)
+		})
+	}
+
+	assert.NoError(t, mux.Close())
+	assert.NoError(t, muxWithLo.Close())
 }
 
 // Assert that STUN gathering is done concurrently
@@ -488,6 +571,122 @@ func TestTURNProxyDialer(t *testing.T) {
 	assert.NoError(t, a.Close())
 }
 
+// Assert that candidates are given for each mux in a MultiUDPMux
+func TestMultiUDPMuxUsage(t *testing.T) {
+	report := test.CheckRoutines(t)
+	defer report()
+
+	lim := test.TimeOut(time.Second * 30)
+	defer lim.Stop()
+
+	var expectedPorts []int
+	var udpMuxInstances []UDPMux
+	for i := 0; i < 3; i++ {
+		port := randomPort(t)
+		conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: port})
+		assert.NoError(t, err)
+		defer func() {
+			_ = conn.Close()
+		}()
+
+		expectedPorts = append(expectedPorts, port)
+		muxDefault := NewUDPMuxDefault(UDPMuxParams{UDPConn: conn})
+		udpMuxInstances = append(udpMuxInstances, muxDefault)
+		idx := i
+		defer func() {
+			_ = udpMuxInstances[idx].Close()
+		}()
+	}
+
+	a, err := NewAgent(&AgentConfig{
+		NetworkTypes:   supportedNetworkTypes(),
+		CandidateTypes: []CandidateType{CandidateTypeHost},
+		UDPMux:         NewMultiUDPMuxDefault(udpMuxInstances...),
+	})
+	assert.NoError(t, err)
+
+	candidateCh := make(chan Candidate)
+	assert.NoError(t, a.OnCandidate(func(c Candidate) {
+		if c == nil {
+			close(candidateCh)
+			return
+		}
+		candidateCh <- c
+	}))
+	assert.NoError(t, a.GatherCandidates())
+
+	portFound := make(map[int]bool)
+	for c := range candidateCh {
+		portFound[c.Port()] = true
+		assert.True(t, c.NetworkType().IsUDP(), "All candidates should be UDP")
+	}
+	assert.Len(t, portFound, len(expectedPorts))
+	for _, port := range expectedPorts {
+		assert.True(t, portFound[port], "There should be a candidate for each UDP mux port")
+	}
+
+	assert.NoError(t, a.Close())
+}
+
+// Assert that candidates are given for each mux in a MultiTCPMux
+func TestMultiTCPMuxUsage(t *testing.T) {
+	report := test.CheckRoutines(t)
+	defer report()
+
+	lim := test.TimeOut(time.Second * 30)
+	defer lim.Stop()
+
+	var expectedPorts []int
+	var tcpMuxInstances []TCPMux
+	for i := 0; i < 3; i++ {
+		port := randomPort(t)
+		listener, err := net.ListenTCP("tcp", &net.TCPAddr{
+			IP:   net.IP{127, 0, 0, 1},
+			Port: port,
+		})
+		assert.NoError(t, err)
+		defer func() {
+			_ = listener.Close()
+		}()
+
+		expectedPorts = append(expectedPorts, port)
+		tcpMuxInstances = append(tcpMuxInstances, NewTCPMuxDefault(TCPMuxParams{
+			Listener:       listener,
+			ReadBufferSize: 8,
+		}))
+	}
+
+	a, err := NewAgent(&AgentConfig{
+		NetworkTypes:   supportedNetworkTypes(),
+		CandidateTypes: []CandidateType{CandidateTypeHost},
+		TCPMux:         NewMultiTCPMuxDefault(tcpMuxInstances...),
+	})
+	assert.NoError(t, err)
+
+	candidateCh := make(chan Candidate)
+	assert.NoError(t, a.OnCandidate(func(c Candidate) {
+		if c == nil {
+			close(candidateCh)
+			return
+		}
+		candidateCh <- c
+	}))
+	assert.NoError(t, a.GatherCandidates())
+
+	portFound := make(map[int]bool)
+	for c := range candidateCh {
+		if c.NetworkType().IsTCP() {
+			portFound[c.Port()] = true
+		}
+	}
+	assert.Len(t, portFound, len(expectedPorts))
+	for _, port := range expectedPorts {
+		assert.True(t, portFound[port], "There should be a candidate for each TCP mux port")
+	}
+
+	assert.NoError(t, a.Close())
+}
+
 // Assert that UniversalUDPMux is used while gathering when configured in the Agent
 func TestUniversalUDPMuxUsage(t *testing.T) {
 	report := test.CheckRoutines(t)
@@ -558,7 +757,7 @@ func (m *universalUDPMuxMock) GetRelayedAddr(turnAddr net.Addr, deadline time.Du
 	return nil, errNotImplemented
 }
 
-func (m *universalUDPMuxMock) GetConnForURL(ufrag string, url string, isIPv6 bool) (net.PacketConn, error) {
+func (m *universalUDPMuxMock) GetConnForURL(ufrag string, url string, addr net.Addr) (net.PacketConn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.getConnForURLTimes++
@@ -576,4 +775,8 @@ func (m *universalUDPMuxMock) RemoveConnByUfrag(ufrag string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.removeConnByUfragTimes++
+}
+
+func (m *universalUDPMuxMock) GetListenAddresses() []net.Addr {
+	return []net.Addr{m.conn.LocalAddr()}
 }
